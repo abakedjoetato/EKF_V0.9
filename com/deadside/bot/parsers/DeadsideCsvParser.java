@@ -34,7 +34,8 @@ public class DeadsideCsvParser {
     
     // Format of the CSV death log: timestamp;killer;killerId;victim;victimId;weapon;distance;platform1;platform2;
     // Format example: 2025.05.15-00.11.07;Fatalben0;0002548521ba4271a497e39d5bfe5611;Rogue731;00022ac42542497589f654e6ac2c0a6f;MR5;20;XSX;XSX;
-    private static final Pattern CSV_LINE_PATTERN = Pattern.compile("(\\d{4}\\.\\d{2}\\.\\d{2}-\\d{2}\\.\\d{2}\\.\\d{2});([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);(\\d+);([^;]+);([^;]+);?");
+    // Updated pattern to be more flexible with various CSV formats
+    private static final Pattern CSV_LINE_PATTERN = Pattern.compile("(\\d{4}\\.\\d{2}\\.\\d{2}-\\d{2}\\.\\d{2}\\.\\d{2});([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);?");
     private static final SimpleDateFormat CSV_DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss");
     // Alternative format seen in the CSV files (2025.05.15-00.11.07)
     private static final SimpleDateFormat ALT_DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss");
@@ -117,11 +118,11 @@ public class DeadsideCsvParser {
             }
             
             if (isHistoricalProcessing) {
-                // For historical parsing, we process multiple files in sequence
+                // For historical parsing, we process ALL files in sequence for newly added servers
                 if (!csvFiles.isEmpty()) {
-                    // Start with oldest files first (up to a reasonable limit to prevent processing thousands of files)
-                    int startIndex = Math.max(0, csvFiles.size() - 10); // Process up to 10 most recent files
-                    for (int i = startIndex; i < csvFiles.size(); i++) {
+                    // Process all files starting from the oldest to ensure full historical data is captured
+                    // This is especially important for newly added servers
+                    for (int i = 0; i < csvFiles.size(); i++) {
                         filesToProcess.add(csvFiles.get(i));
                     }
                     
@@ -357,110 +358,92 @@ public class DeadsideCsvParser {
         boolean isRelocation = RELOCATION_CAUSES.contains(normalizedWeapon);
         boolean isFalling = FALLING_CAUSES.contains(normalizedWeapon);
         
-        // Add detailed processing for better logs
-        if (isSuicide) {
-            if (isRelocation) {
-                // Handle relocation suicides - don't count these in stats
-                sendRelocationKillfeed(server, timestamp, victim, victimId);
-                logger.debug("Relocation recorded for player: {}", victim);
-            } else if (isFalling) {
-                // Handle falling deaths
-                sendSuicideKillfeed(server, timestamp, victim, victimId, "falling");
-                updateSuicideStats(victim, victimId, "falling");
-                logger.debug("Falling death recorded for player: {}", victim);
-            } else if (isSystemSuicide) {
-                // Handle other game-mechanic suicides (bleeding, drowning, etc)
-                sendSuicideKillfeed(server, timestamp, victim, victimId, normalizedWeapon);
-                updateSuicideStats(victim, victimId, normalizedWeapon);
-                logger.debug("Suicide recorded for {}: {}", victim, normalizedWeapon);
+        try {
+            // Parse the timestamp
+            Date deathTime = parseTimestamp(timestamp);
+            if (deathTime == null) {
+                logger.warn("Could not parse timestamp: {}", timestamp);
+                return;
+            }
+            
+            // Update player stats in database
+            if (!isRelocation) {  // Don't count relocations as deaths for stats
+                updatePlayerStats(server, killer, victim, weapon, isSuicide, isFalling);
+            }
+            
+            // Send appropriate killfeed message based on death type
+            boolean isHistoricalProcessing = 
+                com.deadside.bot.utils.ParserStateManager.isHistoricalParsingEnabled(server.getName(), server.getGuildId());
+            
+            // Only send Discord messages for non-historical processing
+            if (!isHistoricalProcessing) {
+                if (isRelocation) {
+                    sendRelocationKillfeed(server, timestamp, victim, victimId);
+                } else if (isSuicide || isSystemSuicide) {
+                    sendSuicideKillfeed(server, timestamp, victim, victimId, weapon);
+                } else {
+                    sendPlayerKillKillfeed(server, timestamp, killer, killerId, victim, victimId, weapon, distance);
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Error processing death for {}: {}", victim, e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Parse timestamp from the log file
+     */
+    private Date parseTimestamp(String timestamp) {
+        try {
+            return CSV_DATE_FORMAT.parse(timestamp);
+        } catch (ParseException e) {
+            try {
+                // Try alternative format if primary fails
+                return ALT_DATE_FORMAT.parse(timestamp);
+            } catch (ParseException e2) {
+                logger.warn("Failed to parse timestamp: {}", timestamp);
+                return null;
+            }
+        }
+    }
+    
+    /**
+     * Update player statistics in the database
+     */
+    private void updatePlayerStats(GameServer server, String killer, String victim, String weapon, 
+                                 boolean isSuicide, boolean isFalling) {
+        try {
+            // Record the kill stat
+            if (!isSuicide) {
+                // This is a regular kill - someone killed someone else
+                Player killerPlayer = playerRepository.findOrCreatePlayer(server.getGuildId(), killer);
+                killerPlayer.incrementKills();
+                killerPlayer.addWeaponKill(weapon);
+                playerRepository.save(killerPlayer);
+                
+                Player victimPlayer = playerRepository.findOrCreatePlayer(server.getGuildId(), victim);
+                victimPlayer.incrementDeaths();
+                playerRepository.save(victimPlayer);
             } else {
-                // Handle self-kill (player killed themselves with a weapon)
-                sendSuicideKillfeed(server, timestamp, victim, victimId, "self");
-                updateSuicideStats(victim, victimId, weapon);
-                logger.debug("Self-kill recorded for {}: {}", victim, weapon);
+                // This is a suicide
+                Player player = playerRepository.findOrCreatePlayer(server.getGuildId(), victim);
+                if (isFalling) {
+                    player.incrementFallingDeaths();
+                } else {
+                    player.incrementSuicides();
+                }
+                playerRepository.save(player);
             }
-        } else {
-            // Normal PvP kill
-            sendPlayerKillKillfeed(server, timestamp, victim, victimId, killer, killerId, weapon, distance);
-            
-            // Only update kill/death stats for legitimate PvP kills
-            updateKillerStats(killer, killerId);
-            updateVictimStats(victim, victimId);
-            logger.debug("Kill recorded: {} killed {} with {} from {}m", killer, victim, weapon, distance);
-        }
-    }
-    
-    /**
-     * Update the killer's stats
-     */
-    private void updateKillerStats(String killer, String killerId) {
-        try {
-            Player player = playerRepository.findByDeadsideId(killerId);
-            if (player == null) {
-                // If player doesn't exist in database, don't create yet
-                // They can be created when they link their account
-                return;
-            }
-            
-            // Update kills and score
-            player.setKills(player.getKills() + 1);
-            player.setScore(player.getScore() + 10); // +10 points per kill
-            
-            // Add kill reward
-            // TODO: Add economy reward here if implemented
-            
-            playerRepository.save(player);
         } catch (Exception e) {
-            logger.error("Error updating killer stats for {}: {}", killer, e.getMessage(), e);
+            logger.error("Error updating player stats: {}", e.getMessage(), e);
         }
     }
     
     /**
-     * Update the victim's stats
+     * Send a kill notification to the killfeed channel
      */
-    private void updateVictimStats(String victim, String victimId) {
-        try {
-            Player player = playerRepository.findByDeadsideId(victimId);
-            if (player == null) {
-                // If player doesn't exist in database, don't create yet
-                return;
-            }
-            
-            // Update deaths
-            player.setDeaths(player.getDeaths() + 1);
-            
-            playerRepository.save(player);
-        } catch (Exception e) {
-            logger.error("Error updating victim stats for {}: {}", victim, e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * Update suicide stats for a player
-     */
-    private void updateSuicideStats(String victim, String victimId, String cause) {
-        try {
-            Player player = playerRepository.findByDeadsideId(victimId);
-            if (player == null) {
-                // If player doesn't exist in database, don't create yet
-                return;
-            }
-            
-            // Increment suicide count instead of kills/deaths
-            player.setSuicides(player.getSuicides() + 1);
-            
-            playerRepository.save(player);
-            logger.debug("Updated suicide count for {}: cause={}", victim, cause);
-        } catch (Exception e) {
-            logger.error("Error updating suicide stats for {}: {}", victim, e.getMessage(), e);
-        }
-    }
-    
-    /**
-     * Send killfeed message for player kill
-     */
-    private void sendPlayerKillKillfeed(GameServer server, String timestamp, String victim, String victimId,
-                                       String killer, String killerId, String weapon, int distance) {
+    private void sendPlayerKillKillfeed(GameServer server, String timestamp, String killer, String killerId,
+                                      String victim, String victimId, String weapon, int distance) {
         try {
             // Use our advanced killfeed embed with proper styling
             MessageEmbed embed = EmbedUtils.pvpKillfeedEmbed(killer, victim, weapon, distance);
@@ -497,11 +480,8 @@ public class DeadsideCsvParser {
             
             // Check if it's falling damage or another type of suicide
             if (cause.equalsIgnoreCase("falling")) {
-                // For falling deaths, use the specialized embed
-                int height = 0; // Default height (not available in log)
-                embed = EmbedUtils.fallingDeathEmbed(victim, height);
+                embed = EmbedUtils.fallingDeathEmbed(victim);
             } else {
-                // For regular suicides, use suicide embed with normalized cause
                 embed = EmbedUtils.suicideEmbed(victim, cause);
             }
             
@@ -513,25 +493,83 @@ public class DeadsideCsvParser {
     }
     
     /**
-     * Send embed message to the server's killfeed channel
+     * Send an embed to the killfeed channel
      */
-    private void sendToKillfeedChannel(GameServer server, net.dv8tion.jda.api.entities.MessageEmbed embed) {
-        Guild guild = jda.getGuildById(server.getGuildId());
-        if (guild == null) {
-            logger.warn("Guild not found for server {}: {}", server.getName(), server.getGuildId());
-            return;
-        }
-        
-        TextChannel killfeedChannel = guild.getTextChannelById(server.getKillfeedChannelId());
-        if (killfeedChannel == null) {
-            logger.warn("Killfeed channel not found for server {}: {}", 
-                    server.getName(), server.getKillfeedChannelId());
-            return;
-        }
-        
-        killfeedChannel.sendMessageEmbeds(embed).queue(
-                success -> logger.debug("Sent killfeed to channel {}", killfeedChannel.getId()),
+    private void sendToKillfeedChannel(GameServer server, MessageEmbed embed) {
+        try {
+            // Get the channel from the server
+            TextChannel channel = jda.getTextChannelById(server.getKillfeedChannelId());
+            if (channel == null) {
+                logger.warn("Killfeed channel not found for server: {}", server.getName());
+                return;
+            }
+            
+            // Send to channel
+            channel.sendMessageEmbeds(embed).queue(
+                success -> {},
                 error -> logger.error("Failed to send killfeed: {}", error.getMessage())
-        );
+            );
+        } catch (Exception e) {
+            logger.error("Error sending to killfeed channel: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Process all historical logs for a newly added server
+     * This specifically addresses the issue with historical parsing for newly added servers
+     * 
+     * @param server The server to process historical logs for
+     * @return Number of entries processed
+     */
+    public int processAllHistoricalLogs(GameServer server) {
+        logger.info("Starting FULL historical log processing for server: {}", server.getName());
+        
+        try {
+            // Reset last processed line memory
+            server.setLastProcessedKillfeedFile("");
+            server.setLastProcessedKillfeedLine(0);
+            
+            // Get all CSV files for this server
+            List<String> csvFiles = sftpConnector.findDeathlogFiles(server);
+            if (csvFiles.isEmpty()) {
+                logger.warn("No CSV files found for historical processing of server: {}", server.getName());
+                return 0;
+            }
+            
+            // Sort files chronologically (oldest first)
+            Collections.sort(csvFiles);
+            
+            int totalProcessed = 0;
+            
+            // Process all files, starting from the oldest
+            for (String csvFile : csvFiles) {
+                logger.info("Processing historical file: {} for server: {}", csvFile, server.getName());
+                
+                String content = sftpConnector.readDeathlogFile(server, csvFile);
+                if (content == null || content.isEmpty()) {
+                    logger.warn("Empty or unreadable historical file: {}", csvFile);
+                    continue;
+                }
+                
+                // Process the entire file
+                int processed = processDeathLog(server, content);
+                totalProcessed += processed;
+                
+                // Update server's tracking information
+                server.setLastProcessedKillfeedFile(csvFile);
+                server.setLastProcessedKillfeedLine(processed - 1); // Last line processed
+                
+                logger.info("Processed {} entries from historical file: {}", processed, csvFile);
+            }
+            
+            logger.info("Completed FULL historical processing for server: {}, processed {} entries", 
+                    server.getName(), totalProcessed);
+            
+            return totalProcessed;
+        } catch (Exception e) {
+            logger.error("Error processing historical logs for server {}: {}", 
+                    server.getName(), e.getMessage(), e);
+            return 0;
+        }
     }
 }

@@ -117,11 +117,11 @@ public class DeadsideCsvParser {
             }
             
             if (isHistoricalProcessing) {
-                // For historical parsing, we process multiple files in sequence
+                // For historical parsing, we process ALL files in sequence for newly added servers
                 if (!csvFiles.isEmpty()) {
-                    // Start with oldest files first (up to a reasonable limit to prevent processing thousands of files)
-                    int startIndex = Math.max(0, csvFiles.size() - 10); // Process up to 10 most recent files
-                    for (int i = startIndex; i < csvFiles.size(); i++) {
+                    // Process all files starting from the oldest to ensure full historical data is captured
+                    // This is especially important for newly added servers
+                    for (int i = 0; i < csvFiles.size(); i++) {
                         filesToProcess.add(csvFiles.get(i));
                     }
                     
