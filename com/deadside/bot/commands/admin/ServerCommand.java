@@ -377,51 +377,45 @@ public class ServerCommand implements ICommand {
                 ParserStateManager.pauseCSVParser(serverName, guildId, "Initial historical data processing");
                 
                 try {
-                    // Create the required parsers
+                    // Create the required parsers and services
                     SftpConnector sftpConnector = new SftpConnector();
+                    PlayerRepository playerRepository = new PlayerRepository();
                     KillfeedParser killfeedParser = new KillfeedParser(event.getJDA());
                     DeadsideCsvParser csvParser = new DeadsideCsvParser(
-                            event.getJDA(), sftpConnector, new PlayerRepository());
+                            event.getJDA(), sftpConnector, playerRepository);
+                    KillRecordRepository killRecordRepository = new KillRecordRepository();
                     
-                    // Get all CSV files
-                    List<String> allFiles = sftpConnector.findDeathlogFiles(server);
+                    // Create the historical data processor
+                    HistoricalDataProcessor historicalProcessor = new HistoricalDataProcessor(
+                            serverRepository, killRecordRepository, sftpConnector, csvParser, killfeedParser);
                     
-                    if (allFiles.isEmpty()) {
-                        event.getHook().sendMessageEmbeds(EmbedUtils.infoEmbed("Historical Data Processing",
-                                "No historical CSV files found for server **" + serverName + "**.\n" +
-                                "The bot will begin processing new data as it becomes available.")).queue();
-                        return;
+                    // Process historical data with efficient batch processing and progress updates
+                    event.getHook().sendMessageEmbeds(EmbedUtils.infoEmbed("Historical Data Processing Started",
+                            "Starting historical data processing for server **" + server.getName() + "**.\n" +
+                            "This will process all death logs, player stats, and killfeed entries.\n" +
+                            "Progress updates will be sent periodically.")).queue();
+                    
+                    // Process the historical data - this will give regular progress updates
+                    HistoricalDataProcessor.ProcessingResult result = 
+                            historicalProcessor.processHistoricalData(server, event, false);
+                    
+                    if (result.getTotal() == 0) {
+                        // No historical data was found or processed
+                        event.getHook().sendMessageEmbeds(EmbedUtils.infoEmbed("No Historical Data Found",
+                                "No historical data was found for server **" + server.getName() + "**.\n" +
+                                "The bot will begin processing new data as it becomes available.\n\n" +
+                                "**Important:** Set up a killfeed channel with `/server setkillfeed " + 
+                                serverName + " #channel` to see kill notifications.")).queue();
+                    } else {
+                        // Historical data was processed successfully
+                        event.getHook().sendMessageEmbeds(EmbedUtils.successEmbed("Historical Data Processing Complete",
+                                String.format("Successfully processed historical data for server **%s**:\n" +
+                                "• %d death logs processed\n" +
+                                "• %d killfeed entries processed\n" +
+                                "• All player statistics have been updated\n\n" +
+                                "**Important:** Set up a killfeed channel with `/server setkillfeed %s #channel` to see kill notifications.",
+                                server.getName(), result.getDeathLogs(), result.getKillfeed(), serverName))).queue();
                     }
-                    
-                    // Sort files by name (should be date-based)
-                    Collections.sort(allFiles);
-                    
-                    // Send progress message
-                    event.getHook().sendMessageEmbeds(EmbedUtils.infoEmbed("Historical Data Processing",
-                            "Found " + allFiles.size() + " historical CSV files for server **" + serverName + "**.\n" +
-                            "Beginning to process in chronological order (oldest first)...\n" +
-                            "This ensures proper server data isolation.")).queue();
-                    
-                    // Process each file in order
-                    int totalProcessed = 0;
-                    int fileCounter = 0;
-                    int totalFiles = allFiles.size();
-                    int reportFrequency = Math.max(1, totalFiles / 5); // Report 5 times during processing
-                    
-                    // Get only the newest file for initial processing
-                    String newestFile = allFiles.get(allFiles.size() - 1);
-                    
-                    // Set it as the last processed file to establish a baseline
-                    server.setLastProcessedKillfeedFile(newestFile);
-                    server.setLastProcessedKillfeedLine(-1); // Start at the beginning
-                    serverRepository.save(server);
-                    
-                    // Send final update
-                    event.getHook().sendMessageEmbeds(EmbedUtils.successEmbed("Historical Data Processing Complete",
-                            "Successfully set up historical data tracking for server **" + serverName + "**.\n" +
-                            "The bot will now begin processing new data as it becomes available.\n\n" +
-                            "**Important:** Set up a killfeed channel with `/server setkillfeed " + 
-                            serverName + " #channel` to see kill notifications.")).queue();
                     
                 } finally {
                     // Always resume the parsers

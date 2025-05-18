@@ -93,7 +93,38 @@ public class ProcessHistoricalDataCommand implements ICommand {
         // Start historical processing in a separate thread
         CompletableFuture.runAsync(() -> {
             try {
-                processHistoricalData(event.getGuild(), server, clearExisting, event);
+                // Create required components for historical processing
+                SftpConnector sftpConnector = new SftpConnector();
+                com.deadside.bot.db.repositories.PlayerRepository playerRepository = 
+                    new com.deadside.bot.db.repositories.PlayerRepository();
+                com.deadside.bot.parsers.KillfeedParser killfeedParser = 
+                    new com.deadside.bot.parsers.KillfeedParser(event.getJDA());
+                DeadsideCsvParser csvParser = new DeadsideCsvParser(
+                    event.getJDA(), sftpConnector, playerRepository);
+                
+                // Create the historical data processor with all necessary components
+                com.deadside.bot.utils.HistoricalDataProcessor historicalProcessor = 
+                    new com.deadside.bot.utils.HistoricalDataProcessor(
+                        serverRepository, killRecordRepository, sftpConnector, csvParser, killfeedParser);
+                
+                // Pause regular parsers for this server
+                ParserStateManager.pauseKillfeedParser(server.getName(), server.getGuildId(), 
+                    "Historical data processing");
+                ParserStateManager.pauseCSVParser(server.getName(), server.getGuildId(), 
+                    "Historical data processing");
+                
+                try {
+                    // Process all historical data with the improved batch processor
+                    com.deadside.bot.utils.HistoricalDataProcessor.ProcessingResult result = 
+                        historicalProcessor.processHistoricalData(server, event, clearExisting);
+                    
+                    logger.info("Historical data processing complete for server '{}': {} death logs, {} killfeed entries", 
+                        server.getName(), result.getDeathLogs(), result.getKillfeed());
+                } finally {
+                    // Always resume the parsers
+                    ParserStateManager.resumeKillfeedParser(server.getName(), server.getGuildId());
+                    ParserStateManager.resumeCSVParser(server.getName(), server.getGuildId());
+                }
             } catch (Exception e) {
                 logger.error("Error processing historical data for server: {}", serverName, e);
                 event.getHook().sendMessageEmbeds(EmbedUtils.errorEmbed("Error",

@@ -38,6 +38,27 @@ public class DeadsideCsvParser {
     // Flag to indicate if we're processing historical data (to prevent sending to killfeed channels)
     private boolean isProcessingHistoricalData = false;
     
+    /**
+     * Set historical processing mode flag
+     * @param isProcessingHistoricalData Whether we're processing historical data
+     */
+    public void setProcessingHistoricalData(boolean isProcessingHistoricalData) {
+        this.isProcessingHistoricalData = isProcessingHistoricalData;
+        logger.debug("Historical processing mode set to: {}", isProcessingHistoricalData);
+    }
+    
+    /**
+     * Process a death log file content directly
+     * This is used by the HistoricalDataProcessor to process files in batches
+     * 
+     * @param server The game server
+     * @param content The file content
+     * @return Number of deaths processed
+     */
+    public int processDeathLogContent(GameServer server, String content) {
+        return processDeathLog(server, content);
+    }
+    
     // Format of the CSV death log: timestamp;killer;killerId;victim;victimId;weapon;distance;killerPlatform;victimPlatform
     private static final Pattern CSV_LINE_PATTERN = Pattern.compile("(\\d{4}\\.\\d{2}\\.\\d{2}-\\d{2}\\.\\d{2}\\.\\d{2});([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);?");
     private static final SimpleDateFormat CSV_DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss");
@@ -199,28 +220,35 @@ public class DeadsideCsvParser {
                 try {
                     Date deathTime = CSV_DATE_FORMAT.parse(timestamp);
                     // Each server has its own independent lastProcessedTimestamp that we check against
-                    logger.info("Death timestamp: {} ({}), server timestamp: {}, historical mode: {}, server: {}", 
-                            timestamp, deathTime.getTime(), server.getLastProcessedTimestamp(), 
-                            isProcessingHistoricalData ? "yes" : "no", 
-                            server.getName());
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Death timestamp: {} ({}), server timestamp: {}, historical mode: {}, server: {}", 
+                                timestamp, deathTime.getTime(), server.getLastProcessedTimestamp(), 
+                                isProcessingHistoricalData ? "yes" : "no", 
+                                server.getName());
+                    }
                     
-                    // Skip time-based filtering when doing historical processing
-                    boolean historicalMode = isProcessingHistoricalData;
-                    if (!historicalMode && server.getLastProcessedTimestamp() > 0 && 
+                    // Skip time-based filtering when doing historical processing - this keeps server timestamps isolated
+                    if (!isProcessingHistoricalData && server.getLastProcessedTimestamp() > 0 && 
                         deathTime.getTime() < server.getLastProcessedTimestamp()) {
-                        logger.info("Skipping old death due to timestamp (server: {})", server.getName());
+                        if (logger.isDebugEnabled()) {
+                            logger.debug("Skipping old death due to timestamp (server: {})", server.getName());
+                        }
                         continue;
                     }
                 } catch (ParseException e) {
                     logger.warn("Could not parse death timestamp: {}", timestamp);
                 }
                 
-                // Process death with additional debug logging
-                logger.info("Processing death: {} killed {} with {} ({}m)", killer, victim, weapon, distance);
+                // Process death (controlled logging)
+                if (logger.isDebugEnabled()) {
+                    logger.debug("Processing death: {} killed {} with {} ({}m)", killer, victim, weapon, distance);
+                }
                 try {
                     processDeath(server, timestamp, victim, victimId, killer, killerId, weapon, distance);
                     count++;
-                    logger.info("Death successfully processed and counted");
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Death successfully processed and counted");
+                    }
                 } catch (Exception e) {
                     logger.error("Failed to process death: {}", e.getMessage(), e);
                 }
@@ -248,7 +276,7 @@ public class DeadsideCsvParser {
                                 victim.equals(killer);
             
             if (isSuicide) {
-                // Send suicide message to death channel
+                // Send suicide message to death channel (and update stats)
                 sendSuicideKillfeed(server, timestamp, victim, victimId, weapon);
             } else {
                 // Determine appropriate event type based on the death
@@ -262,12 +290,11 @@ public class DeadsideCsvParser {
                     eventType = "longshot";
                 }
                 
-                // Send to appropriate channel based on event type
+                // Send to appropriate channel based on event type (and update stats)
                 sendPlayerKillKillfeed(server, timestamp, victim, victimId, killer, killerId, weapon, distance, eventType);
                 
-                // Update player stats with weapon and distance information
-                updateKillerStats(killer, killerId, weapon, distance);
-                updateVictimStats(victim, victimId);
+                // Note: player stats are now updated in the killfeed methods to ensure
+                // they're always updated even during historical processing
             }
         } catch (Exception e) {
             logger.error("Error processing death: {} killed by {}: {}", victim, killer, e.getMessage(), e);
@@ -365,6 +392,15 @@ public class DeadsideCsvParser {
     private void sendPlayerKillKillfeed(GameServer server, String timestamp, String victim, String victimId,
                                        String killer, String killerId, String weapon, int distance, String eventType) {
         try {
+            // Always update player statistics even during historical processing
+            updateKillerStats(killer, killerId, weapon, distance);
+            updateVictimStats(victim, victimId);
+            
+            // Skip sending killfeed embeds during historical processing
+            if (isProcessingHistoricalData) {
+                return;
+            }
+            
             MessageEmbed embed;
             
             // Check if this is a special kill type and create appropriate embed
@@ -414,6 +450,14 @@ public class DeadsideCsvParser {
      */
     private void sendSuicideKillfeed(GameServer server, String timestamp, String victim, String victimId, String cause) {
         try {
+            // Always update statistics even during historical processing
+            updateVictimStats(victim, victimId);
+            
+            // Skip killfeed message during historical processing
+            if (isProcessingHistoricalData) {
+                return;
+            }
+            
             MessageEmbed embed;
             
             // Check if it's falling damage or another type of suicide
