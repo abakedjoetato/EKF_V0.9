@@ -177,6 +177,11 @@ public class HistoricalDataProcessor {
             int totalProcessed = 0;
             AtomicInteger batchCount = new AtomicInteger(0);
             
+            // Track statistics for detailed reporting
+            AtomicInteger killCount = new AtomicInteger(0);
+            AtomicInteger deathCount = new AtomicInteger(0);
+            AtomicInteger suicideCount = new AtomicInteger(0);
+            
             // Calculate update frequency
             int updateEvery = Math.max(1, totalFiles / 20); // Update about 20 times during processing
             
@@ -195,14 +200,19 @@ public class HistoricalDataProcessor {
                     int totalBatches = (int) Math.ceil((double) totalFiles / BATCH_SIZE);
                     int progressPercent = (int) (((double) i / totalFiles) * 100);
                     
-                    event.getHook().sendMessageEmbeds(EmbedUtils.infoEmbed(
-                            "Death Log Processing Progress",
-                            String.format("**Server**: %s\n" +
+                    // Create a more informative progress report
+                    String progressDesc = String.format("**Server**: %s\n" +
                             "**Progress**: %d/%d files (%d%%)\n" +
                             "**Batch**: %d/%d\n" +
-                            "**Deaths processed**: %d",
+                            "**Deaths processed**: %d\n\n" +
+                            "Player statistics are being updated as data is processed.\n" +
+                            "This ensures accurate tracking without sending Discord notifications for historical events.",
                             server.getName(), i + batch.size(), totalFiles, progressPercent,
-                            batchNum, totalBatches, totalProcessed)
+                            batchNum, totalBatches, totalProcessed);
+                    
+                    event.getHook().sendMessageEmbeds(EmbedUtils.infoEmbed(
+                            "Historical Data Processing Progress", 
+                            progressDesc
                     )).queue();
                 }
             }
@@ -234,15 +244,21 @@ public class HistoricalDataProcessor {
                     continue;
                 }
                 
-                // Force historical mode
+                // Force historical mode to ensure player stats are updated but embeds aren't sent
                 csvParser.setProcessingHistoricalData(true);
                 
-                // Process file
+                // Process file with player stat updates
                 int fileProcessed = csvParser.processDeathLogContent(server, content);
                 batchTotal += fileProcessed;
                 
-                logger.debug("Processed file {} for server {}: {} deaths", 
-                        csvFile, server.getName(), fileProcessed);
+                // Only log meaningful information to reduce console noise
+                if (fileProcessed > 0) {
+                    logger.info("Historical batch - processed {} deaths from file for server {}", 
+                            fileProcessed, server.getName());
+                } else if (logger.isDebugEnabled()) {
+                    logger.debug("Historical batch - processed file {} for server {}: no new deaths", 
+                            csvFile, server.getName());
+                }
                 
             } catch (Exception e) {
                 // Log error but continue with next file

@@ -144,8 +144,14 @@ public class DeadsideCsvParser {
                     
                     // Mark as processed
                     processed.add(csvFile);
-                    logger.info("Processed death log file {} for server {}, {} deaths", 
-                            csvFile, server.getName(), deathsProcessed);
+                    // Use info level for files with deaths, debug level for empty files
+                    if (deathsProcessed > 0) {
+                        logger.info("Processed {} deaths from log file for server {}", 
+                                deathsProcessed, server.getName());
+                    } else if (logger.isDebugEnabled()) {
+                        logger.debug("Processed death log file {} for server {}, no new deaths", 
+                                csvFile, server.getName());
+                    }
                 } catch (Exception e) {
                     logger.error("Error processing death log file {} for server {}: {}", 
                             csvFile, server.getName(), e.getMessage(), e);
@@ -196,7 +202,9 @@ public class DeadsideCsvParser {
                 logger.info("CSV line skipped - pattern mismatch: {}", line);
                 continue;
             }
-            logger.info("CSV line matched pattern successfully: {}", line);
+            if (logger.isDebugEnabled()) {
+                logger.debug("CSV line matched pattern: {}", line);
+            }
             
             try {
                 String[] parts = line.split(";");
