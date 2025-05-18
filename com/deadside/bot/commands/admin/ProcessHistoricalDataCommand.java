@@ -200,6 +200,16 @@ public class ProcessHistoricalDataCommand implements ICommand {
                                         com.deadside.bot.parsers.KillfeedParser killfeedParser,
                                         SlashCommandInteractionEvent event) {
         try {
+            // Store current timestamp before processing historical data
+            long currentTimestamp = server.getLastProcessedTimestamp();
+            logger.info("Starting historical processing for server: {}. Current timestamp: {}", 
+                      server.getName(), currentTimestamp);
+            
+            // Clear the timestamp temporarily to process ALL historical data without filtering
+            server.setLastProcessedTimestamp(0);
+            gameServerRepository.update(server);
+            logger.info("Cleared timestamp for historical processing for server: {}", server.getName());
+            
             // Get SFTP connector to find all CSV files
             SftpConnector sftpConnector = new SftpConnector();
             List<String> allFiles = sftpConnector.findDeathlogFiles(server);
@@ -259,6 +269,13 @@ public class ProcessHistoricalDataCommand implements ICommand {
                         csvFile, server.getName(), thisFileProcessed);
             }
             
+            // Update the server's timestamp to the current time to mark where live processing should resume
+            long newTimestamp = System.currentTimeMillis();
+            server.setLastProcessedTimestamp(newTimestamp);
+            serverRepository.update(server);
+            logger.info("Historical processing complete for server: {}. Updated timestamp to: {}", 
+                    server.getName(), newTimestamp);
+            
             return totalProcessed;
         } catch (Exception e) {
             logger.error("Error processing historical data for server: {}", server.getName(), e);
@@ -293,17 +310,37 @@ public class ProcessHistoricalDataCommand implements ICommand {
                 totalLines++;
                 
                 try {
-                    // Use the KillfeedParser's method to parse the line
-                    // This ensures consistent handling of suicides and falling deaths
-                    // We need to use reflection since parseKillRecord is private
-                    java.lang.reflect.Method parseMethod = 
-                        com.deadside.bot.parsers.KillfeedParser.class.getDeclaredMethod(
-                            "parseKillRecord", String.class, com.deadside.bot.db.models.GameServer.class);
+                    // Process the line directly for consistent parsing
+                    // Parse the line manually to match the CSV format:
+                    // timestamp;killer;killerId;victim;victimId;weapon;distance;killerPlatform;victimPlatform
+                    String[] parts = line.split(";");
+                    if (parts.length >= 9) {
+                        String timestamp = parts[0];
+                        String killer = parts[1];
+                        String killerId = parts[2];
+                        String victim = parts[3];
+                        String victimId = parts[4];
+                        String weapon = parts[5];
+                        int distance = 0;
+                        try {
+                            distance = Integer.parseInt(parts[6]);
+                        } catch (NumberFormatException e) {
+                            // Ignore non-numeric distances
+                        }
+                        
+                        // Create a KillRecord directly
+                        KillRecord record = new KillRecord(
+                            server.getName(),
+                            server.getGuildId(),
+                            killer,
+                            killerId,
+                            victim,
+                            victimId,
+                            weapon,
+                            distance,
+                            timestamp
+                        );
                     
-                    parseMethod.setAccessible(true);
-                    KillRecord record = (KillRecord) parseMethod.invoke(killfeedParser, line, server);
-                    
-                    if (record != null) {
                         // Successfully parsed a kill record
                         successfullyParsed++;
                         

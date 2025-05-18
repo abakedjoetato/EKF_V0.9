@@ -85,7 +85,7 @@ public class HistoricalDataProcessor {
                     adminChannel.sendMessageEmbeds(embed).queue();
                 }
                 
-                // Process death logs
+                // Process death logs with historical mode flag
                 int deathlogsProcessed = csvParser.processDeathLogs(server, true);
                 
                 // Send final completion message with modern embed styling

@@ -1,78 +1,116 @@
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
- * Simple test to validate the CSV line pattern matching for the historical parser
+ * Test utility to directly test the Historical CSV Parser functionality
  */
 public class TestHistoricalCsvParser {
-    // Original pattern that's failing to match lines
-    private static final Pattern ORIGINAL_PATTERN = Pattern.compile("(\\d{4}\\.\\d{2}\\.\\d{2}-\\d{2}\\.\\d{2}\\.\\d{2});([^;]+);([^;]+);([^;]+);([^;]+);([^;]+);(\\d+);([^;]+);([^;]+);?");
+    // The updated pattern matching our actual CSV format
+    private static final Pattern CSV_LINE_PATTERN = Pattern.compile("(\\d{4}\\.\\d{2}\\.\\d{2}-\\d{2}\\.\\d{2}\\.\\d{2});([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);?");
     
-    // Updated pattern that should be more flexible with CSV formats
-    private static final Pattern UPDATED_PATTERN = Pattern.compile("(\\d{4}\\.\\d{2}\\.\\d{2}-\\d{2}\\.\\d{2}\\.\\d{2});([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);?");
+    // Date format for parsing timestamps
+    private static final SimpleDateFormat CSV_DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss");
     
     public static void main(String[] args) {
         String csvFile = "attached_assets/2025.05.15-00.00.00.csv";
+        System.out.println("Testing Historical CSV Parser with file: " + csvFile);
         
-        System.out.println("Testing CSV pattern matching for historical parser");
-        System.out.println("File: " + csvFile);
+        // Simulating different timestamp scenarios
+        long currentTimestamp = System.currentTimeMillis();
+        long pastTimestamp = currentTimestamp - (7 * 24 * 60 * 60 * 1000); // 7 days ago
         
+        System.out.println("Current system time: " + new Date(currentTimestamp));
+        System.out.println("Simulated 'last processed' time: " + new Date(pastTimestamp));
+        System.out.println("-----------------------------------------------------\n");
+        
+        // Run with normal mode (should filter old entries)
+        System.out.println("RUNNING IN NORMAL MODE (should filter old entries):");
+        processFile(csvFile, pastTimestamp, false);
+        
+        System.out.println("\n-----------------------------------------------------\n");
+        
+        // Run with historical mode (should process all entries)
+        System.out.println("RUNNING IN HISTORICAL MODE (should process all entries):");
+        processFile(csvFile, pastTimestamp, true);
+    }
+    
+    private static void processFile(String csvFile, long lastProcessedTimestamp, boolean isHistoricalMode) {
         try (BufferedReader reader = new BufferedReader(new FileReader(csvFile))) {
             String line;
-            int lineNumber = 0;
-            int originalMatches = 0;
-            int updatedMatches = 0;
+            int lineCount = 0;
+            int matchedLines = 0;
+            int processedLines = 0;
+            int skippedDueToTime = 0;
             
             while ((line = reader.readLine()) != null) {
-                lineNumber++;
+                lineCount++;
                 line = line.trim();
                 if (line.isEmpty()) continue;
                 
-                // Test with original pattern
-                Matcher originalMatcher = ORIGINAL_PATTERN.matcher(line);
-                boolean originalMatched = originalMatcher.matches();
-                if (originalMatched) originalMatches++;
-                
-                // Test with updated pattern
-                Matcher updatedMatcher = UPDATED_PATTERN.matcher(line);
-                boolean updatedMatched = updatedMatcher.matches();
-                if (updatedMatched) updatedMatches++;
-                
-                // Print results for this line
-                System.out.printf("Line %d: Original pattern: %s, Updated pattern: %s%n", 
-                        lineNumber, originalMatched ? "MATCH" : "NO MATCH", updatedMatched ? "MATCH" : "NO MATCH");
-                
-                // If updated pattern matches but original doesn't, show details
-                if (updatedMatched && !originalMatched) {
-                    System.out.println("  Line content: " + line);
-                    if (updatedMatched) {
-                        System.out.println("  Timestamp: " + updatedMatcher.group(1));
-                        System.out.println("  Killer: " + updatedMatcher.group(2));
-                        System.out.println("  Victim: " + updatedMatcher.group(4));
-                        System.out.println("  Weapon: " + updatedMatcher.group(6));
-                        System.out.println("  Distance: " + updatedMatcher.group(7));
+                Matcher matcher = CSV_LINE_PATTERN.matcher(line);
+                if (matcher.matches()) {
+                    matchedLines++;
+                    
+                    // Extract fields from CSV
+                    String timestamp = matcher.group(1);
+                    String killer = matcher.group(2);
+                    String killerId = matcher.group(3);
+                    String victim = matcher.group(4);
+                    String victimId = matcher.group(5);
+                    String weapon = matcher.group(6);
+                    String distance = matcher.group(7);
+                    
+                    try {
+                        // Parse the timestamp to check if it's older than last processed
+                        Date deathTime = CSV_DATE_FORMAT.parse(timestamp);
+                        
+                        boolean shouldSkip = false;
+                        
+                        // Apply the same logic our bot uses for timestamp filtering
+                        if (!isHistoricalMode && lastProcessedTimestamp > 0 && 
+                            deathTime.getTime() < lastProcessedTimestamp) {
+                            skippedDueToTime++;
+                            shouldSkip = true;
+                            System.out.println("SKIPPED (timestamp): " + killer + " killed " + victim + 
+                                               " on " + timestamp);
+                            continue;
+                        }
+                        
+                        // This death would be processed
+                        processedLines++;
+                        boolean isSuicide = killer.equals(victim) || 
+                                           weapon.toLowerCase().contains("suicide") || 
+                                           weapon.toLowerCase().contains("falling");
+                        
+                        if (isSuicide) {
+                            System.out.println("PROCESSED (suicide): " + victim + " died by " + weapon + 
+                                              " on " + timestamp);
+                        } else {
+                            System.out.println("PROCESSED (kill): " + killer + " killed " + victim + 
+                                              " with " + weapon + " at " + distance + "m on " + timestamp);
+                        }
+                        
+                    } catch (ParseException e) {
+                        System.err.println("Error parsing timestamp: " + timestamp);
                     }
-                    System.out.println();
                 }
             }
             
             // Print summary
-            System.out.println("\nSummary:");
-            System.out.println("Total lines: " + lineNumber);
-            System.out.println("Original pattern matches: " + originalMatches);
-            System.out.println("Updated pattern matches: " + updatedMatches);
-            System.out.println("Improvement: " + (updatedMatches - originalMatches) + " additional matches");
-            
-            double originalPercentage = (double)originalMatches / lineNumber * 100;
-            double updatedPercentage = (double)updatedMatches / lineNumber * 100;
-            System.out.printf("Original match rate: %.1f%%%n", originalPercentage);
-            System.out.printf("Updated match rate: %.1f%%%n", updatedPercentage);
+            System.out.println("\nProcessing Results:");
+            System.out.println("Total lines: " + lineCount);
+            System.out.println("Matched lines: " + matchedLines);
+            System.out.println("Processed deaths: " + processedLines);
+            System.out.println("Skipped due to timestamp: " + skippedDueToTime);
             
         } catch (IOException e) {
-            System.err.println("Error reading CSV file: " + e.getMessage());
+            System.err.println("Error reading file: " + e.getMessage());
         }
     }
 }

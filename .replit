@@ -1,4 +1,4 @@
-modules = ["java-latest", "python-3.11", "java-17"]
+modules = ["java-latest", "python-3.11", "java-17", "nodejs-20"]
 [nix]
 channel = "stable-24_05"
 packages = ["maven", "unzip", "mongodb"]

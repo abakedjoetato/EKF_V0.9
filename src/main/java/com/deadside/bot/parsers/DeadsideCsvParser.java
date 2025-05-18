@@ -38,8 +38,8 @@ public class DeadsideCsvParser {
     // Flag to indicate if we're processing historical data (to prevent sending to killfeed channels)
     private boolean isProcessingHistoricalData = false;
     
-    // Format of the CSV death log: timestamp;victim;victimId;killer;killerId;weapon;distance;victimPlatform;killerPlatform
-    private static final Pattern CSV_LINE_PATTERN = Pattern.compile("^\\d{4}\\.\\d{2}\\.\\d{2}-\\d{2}\\.\\d{2}\\.\\d{2};.*;.*;.*;.*;.*;\\d+;.*;.*;$");
+    // Format of the CSV death log: timestamp;killer;killerId;victim;victimId;weapon;distance;killerPlatform;victimPlatform
+    private static final Pattern CSV_LINE_PATTERN = Pattern.compile("(\\d{4}\\.\\d{2}\\.\\d{2}-\\d{2}\\.\\d{2}\\.\\d{2});([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);([^;]*);?");
     private static final SimpleDateFormat CSV_DATE_FORMAT = new SimpleDateFormat("yyyy.MM.dd-HH.mm.ss");
     
     // Death causes
@@ -112,6 +112,10 @@ public class DeadsideCsvParser {
                     continue;
                 }
                 
+                // Log file processing attempt
+                logger.info("Processing CSV file: {} for server: {} (historical mode: {})", 
+                        csvFile, server.getName(), processHistorical ? "yes" : "no");
+                
                 try {
                     String content = sftpConnector.readDeathlogFile(server, csvFile);
                     int deathsProcessed = processDeathLog(server, content);
@@ -166,9 +170,12 @@ public class DeadsideCsvParser {
             }
             
             // Simple validation that this looks like a death log line
-            if (!CSV_LINE_PATTERN.matcher(line).matches()) {
+            boolean lineMatches = CSV_LINE_PATTERN.matcher(line).matches();
+            if (!lineMatches) {
+                logger.info("CSV line skipped - pattern mismatch: {}", line);
                 continue;
             }
+            logger.info("CSV line matched pattern successfully: {}", line);
             
             try {
                 String[] parts = line.split(";");
@@ -177,32 +184,46 @@ public class DeadsideCsvParser {
                     continue;
                 }
                 
-                // Parse death log entry
+                // Parse death log entry - corrected for actual CSV format
                 String timestamp = parts[0];
-                String victim = parts[1];
-                String victimId = parts[2];
-                String killer = parts[3];
-                String killerId = parts[4];
+                String killer = parts[1];
+                String killerId = parts[2];
+                String victim = parts[3];
+                String victimId = parts[4];
                 String weapon = parts[5];
                 int distance = Integer.parseInt(parts[6]);
-                String victimPlatform = parts[7];
-                String killerPlatform = parts[8];
+                String killerPlatform = parts[7];
+                String victimPlatform = parts[8];
                 
-                // Only check timestamp if the server has a non-zero lastProcessedTimestamp
+                // Only check timestamp filtering if not in historical mode
                 try {
                     Date deathTime = CSV_DATE_FORMAT.parse(timestamp);
-                    if (server.getLastProcessedTimestamp() > 0 && deathTime.getTime() < server.getLastProcessedTimestamp()) {
-                        logger.debug("Skipping old death from {} ({}), server timestamp is {}", 
-                                timestamp, deathTime.getTime(), server.getLastProcessedTimestamp());
+                    // Each server has its own independent lastProcessedTimestamp that we check against
+                    logger.info("Death timestamp: {} ({}), server timestamp: {}, historical mode: {}, server: {}", 
+                            timestamp, deathTime.getTime(), server.getLastProcessedTimestamp(), 
+                            (isProcessingHistoricalData || processHistorical) ? "yes" : "no", 
+                            server.getName());
+                    
+                    // Skip time-based filtering when doing historical processing
+                    boolean historicalMode = isProcessingHistoricalData || processHistorical;
+                    if (!historicalMode && server.getLastProcessedTimestamp() > 0 && 
+                        deathTime.getTime() < server.getLastProcessedTimestamp()) {
+                        logger.info("Skipping old death due to timestamp (server: {})", server.getName());
                         continue;
                     }
                 } catch (ParseException e) {
                     logger.warn("Could not parse death timestamp: {}", timestamp);
                 }
                 
-                // Process death
-                processDeath(server, timestamp, victim, victimId, killer, killerId, weapon, distance);
-                count++;
+                // Process death with additional debug logging
+                logger.info("Processing death: {} killed {} with {} ({}m)", killer, victim, weapon, distance);
+                try {
+                    processDeath(server, timestamp, victim, victimId, killer, killerId, weapon, distance);
+                    count++;
+                    logger.info("Death successfully processed and counted");
+                } catch (Exception e) {
+                    logger.error("Failed to process death: {}", e.getMessage(), e);
+                }
             } catch (Exception e) {
                 logger.warn("Error processing death log line: {}", line, e);
             }
