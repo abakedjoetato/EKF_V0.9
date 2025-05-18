@@ -1,0 +1,173 @@
+HISTORICAL PARSER DIAGNOSIS & CORRECTION
+
+OBJECTIVE
+
+This session focuses on validating and repairing the behavior of the historical log parser in the Deadside Java Discord bot system. It must be performed using a structured, rules-driven approach and completed in a single execution batch without checkpoints or interruptions.
+
+
+---
+
+PHASE 0 — PROJECT INIT (REQUIRED)
+
+Perform these steps in order:
+
+1. Unzip the uploaded .zip file from the attached assets
+
+
+2. Move all contents from the unzipped directory to the project root
+
+
+3. Clean up:
+
+Remove any nested or duplicate folders (e.g., project/, DeadsideBot/)
+
+Delete empty folders or broken symbolic links
+
+
+
+4. Scan and log the following:
+
+Main class (with main() entrypoint)
+
+All parser classes
+
+Config files (.env or config.properties)
+
+All command/event handler classes
+
+Any duplicate or unused files
+
+
+
+5. Detect or create a .env or config.properties file
+
+
+6. Load secrets from Replit, including:
+
+BOT_TOKEN
+
+MONGO_URI
+
+
+
+7. Start the bot using JDA 5.x and confirm startup:
+
+Bot must log in and connect to Discord successfully
+
+Console logs must confirm gateway connection and guild presence
+
+
+
+
+> Do not proceed to further phases unless the bot starts, connects, and loads without error.
+
+
+
+
+---
+
+PHASE 1 — HISTORICAL PARSER FUNCTIONALITY VALIDATION & REPAIR
+
+Issue:
+
+The historical parser appears to fail on newly added servers. Although the killfeed parser functions correctly and captures the latest lines, the historical parser fails to process all lines from the .csv files as intended.
+
+This issue may be related to last-processed line memory, file access permissions, or line-matching logic, but all possible causes must be exhaustively examined.
+
+
+---
+
+Diagnostic Checklist:
+
+[ ] Validate the directory structure and file path logic:
+
+Confirm the historical parser is targeting the correct folder: ./{host}_{server}/actual1/deathlogs/
+
+Confirm recursive file discovery logic works as designed
+
+
+[ ] Examine last line memory mechanism:
+
+Ensure historical parser does not prematurely rely on or conflict with live parser memory
+
+It should process all lines and reset or ignore memory on initial run
+
+
+[ ] Verify .csv parsing loop:
+
+Confirm that the parser reads and iterates over every line in every file, in chronological order
+
+Test parsing logic against sample .csv files in attached_assets
+
+
+[ ] Confirm that embedded line filters (e.g., exclusions or silent skips) are not discarding valid entries
+
+
+
+---
+
+Implementation Requirements:
+
+The historical parser must:
+
+Clear previous statistical data for the server before parsing
+
+Reset last-parsed-line memory to null or baseline state
+
+Parse every .csv file fully (from first line to last)
+
+Never output Discord embeds or killfeed messages
+
+Only store results in the database and update leaderboard/stat modules
+
+
+The killfeed parser must remain unaffected and continue processing new lines with memory tracking.
+
+
+
+---
+
+Test & Validation:
+
+Use included .csv sample files to simulate historical ingestion for a newly added server
+
+Log output to confirm:
+
+All files were discovered and parsed
+
+All lines were processed
+
+No embeds were generated
+
+
+Validate data presence in MongoDB for each parsed entry
+
+
+
+---
+
+COMPLETION CRITERIA
+
+A successful result must meet all of the following:
+
+[✓] Historical parser processes all files and lines without error
+
+[✓] No embed output is triggered from historical parsing
+
+[✓] Killfeed parser behavior remains correct and unaltered
+
+[✓] Parsed results are stored in the correct guild/server collections
+
+[✓] Bot compiles, starts, connects, and logs success
+
+
+
+---
+
+STRICT EXECUTION POLICY
+
+No logs, commits, or checkpoints are permitted until the entire task is verified as complete
+
+You must perform all phases as a single atomic batch
+
+Do not proceed using assumption-based debugging—only evidence-driven fixes are accepted
