@@ -25,3 +25,7 @@ args = "./run_bot_with_maven.sh"
 
 [deployment]
 run = ["sh", "-c", "bash build_and_run.sh"]
+
+[[ports]]
+localPort = 8080
+externalPort = 80

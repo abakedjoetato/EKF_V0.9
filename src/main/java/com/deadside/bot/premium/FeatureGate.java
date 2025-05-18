@@ -150,7 +150,7 @@ public class FeatureGate {
                             "• Real-time event notifications\n" +
                             "• Server monitoring and detailed logs")
                 .addActionRow(
-                    Button.link("https://deadside.com/premium", "Get Premium"),
+                    Button.link("https://emeraldskillfeed.tip4serv.com/", "Get Premium"),
                     Button.primary("premium_info", "Learn More")
                 );
                 

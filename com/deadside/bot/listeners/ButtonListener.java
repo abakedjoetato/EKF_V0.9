@@ -243,7 +243,7 @@ public class ButtonListener extends ListenerAdapter {
                 hasPremium ? 
                         Button.primary("premium:features", "View Premium Features")
                         : Button.success("premium:purchase", "Get Premium"),
-                Button.link("https://deadside.com/premium", "Learn More")
+                Button.link("https://emeraldskillfeed.tip4serv.com/", "Learn More")
         ).queue();
     }
     
@@ -362,7 +362,7 @@ public class ButtonListener extends ListenerAdapter {
                 hasPremium ? 
                         Button.secondary("refresh:premium_status", "Refresh Status")
                         : Button.success("premium:purchase", "Get Premium"),
-                Button.link("https://deadside.com/premium", "Learn More")
+                Button.link("https://emeraldskillfeed.tip4serv.com/", "Learn More")
         ).queue();
     }
     
