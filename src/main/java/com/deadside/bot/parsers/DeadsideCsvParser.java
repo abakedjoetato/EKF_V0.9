@@ -201,11 +201,11 @@ public class DeadsideCsvParser {
                     // Each server has its own independent lastProcessedTimestamp that we check against
                     logger.info("Death timestamp: {} ({}), server timestamp: {}, historical mode: {}, server: {}", 
                             timestamp, deathTime.getTime(), server.getLastProcessedTimestamp(), 
-                            (isProcessingHistoricalData || processHistorical) ? "yes" : "no", 
+                            isProcessingHistoricalData ? "yes" : "no", 
                             server.getName());
                     
                     // Skip time-based filtering when doing historical processing
-                    boolean historicalMode = isProcessingHistoricalData || processHistorical;
+                    boolean historicalMode = isProcessingHistoricalData;
                     if (!historicalMode && server.getLastProcessedTimestamp() > 0 && 
                         deathTime.getTime() < server.getLastProcessedTimestamp()) {
                         logger.info("Skipping old death due to timestamp (server: {})", server.getName());
