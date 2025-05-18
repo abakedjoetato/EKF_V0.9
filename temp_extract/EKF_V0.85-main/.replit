@@ -1,0 +1,31 @@
+modules = ["java-17", "postgresql-16", "java-openjdk-17"]
+[nix]
+channel = "stable-24_05"
+packages = ["unzip", "maven"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "DeadsideBot"
+
+[[workflows.workflow]]
+name = "DeadsideBot"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "./start_bot.sh"
+
+[deployment]
+run = ["sh", "-c", "./start_bot.sh"]
+
+[[ports]]
+localPort = 8080
+externalPort = 80
