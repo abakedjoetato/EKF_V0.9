@@ -87,6 +87,7 @@ public class ParserStateManager {
     
     /**
      * Disable historical parsing for a server
+     * Also resets any related tracking state to ensure fresh start after historical processing
      * 
      * @param serverName The game server name
      * @param guildId The Discord guild ID
@@ -94,6 +95,11 @@ public class ParserStateManager {
     public static void disableHistoricalParsing(String serverName, long guildId) {
         ParserState state = getParserState(serverName, guildId);
         state.setHistoricalParsingEnabled(false);
+        
+        // Reset any parser-specific state to ensure clean state after historical processing
+        // This ensures the regular parser will start fresh after historical parsing completes
+        state.clearParserMemory();
+        
         logger.info("Historical parsing disabled for server: {} in guild: {}", serverName, guildId);
     }
     
@@ -210,6 +216,9 @@ public class ParserStateManager {
         
         private boolean historicalParsingEnabled;
         
+        // Additional memory state tracking - allows parsers to store/retrieve last positions
+        private Map<String, Object> parserMemory = new HashMap<>();
+        
         public ParserState(String serverName, long guildId) {
             this.serverName = serverName;
             this.guildId = guildId;
@@ -284,6 +293,33 @@ public class ParserStateManager {
         
         public void setHistoricalParsingEnabled(boolean historicalParsingEnabled) {
             this.historicalParsingEnabled = historicalParsingEnabled;
+        }
+        
+        /**
+         * Clear all parser memory for this server
+         * This is used when transitioning between historical and regular parsing
+         * to ensure a clean state.
+         */
+        public void clearParserMemory() {
+            parserMemory.clear();
+        }
+        
+        /**
+         * Store a value in parser memory
+         * @param key Memory key
+         * @param value Memory value
+         */
+        public void storeInMemory(String key, Object value) {
+            parserMemory.put(key, value);
+        }
+        
+        /**
+         * Retrieve a value from parser memory
+         * @param key Memory key
+         * @return Value or null if not found
+         */
+        public Object retrieveFromMemory(String key) {
+            return parserMemory.get(key);
         }
     }
 }
