@@ -100,9 +100,20 @@ public class DeadsideCsvParser {
             // Sort files by name (which includes date)
             Collections.sort(csvFiles);
             
-            // Get the last processed information from the server object
-            String lastProcessedFile = server.getLastProcessedKillfeedFile();
-            long lastProcessedLine = server.getLastProcessedKillfeedLine();
+            // Get the last processed information using ParserStateManager to ensure server isolation
+            com.deadside.bot.utils.ParserStateManager.ParserState state = 
+                com.deadside.bot.utils.ParserStateManager.getParserState(server.getName(), server.getGuildId());
+                
+            // Try to get state from memory first, fall back to server object if not available
+            String lastProcessedFile = (String) state.retrieveFromMemory("lastProcessedFile");
+            if (lastProcessedFile == null) {
+                lastProcessedFile = server.getLastProcessedKillfeedFile();
+                // Store for future use
+                state.storeInMemory("lastProcessedFile", lastProcessedFile);
+            }
+            
+            Long lastLineObj = (Long) state.retrieveFromMemory("lastProcessedLine");
+            long lastProcessedLine = lastLineObj != null ? lastLineObj : server.getLastProcessedKillfeedLine();
             
             // Improved logic for historical vs. regular processing
             List<String> filesToProcess = new ArrayList<>();
@@ -118,17 +129,24 @@ public class DeadsideCsvParser {
             }
             
             if (isHistoricalProcessing) {
-                // For historical parsing, we process multiple files in sequence
+                // For historical parsing, we process multiple files in sequence - FULL RESET of tracking state
+                // Reset all parser memory when starting historical processing to ensure clean start
+                state.clearParserMemory();
+                
                 if (!csvFiles.isEmpty()) {
-                    // Start with oldest files first (up to a reasonable limit to prevent processing thousands of files)
-                    int startIndex = Math.max(0, csvFiles.size() - 10); // Process up to 10 most recent files
-                    for (int i = startIndex; i < csvFiles.size(); i++) {
+                    // Process ALL files in the server's folder, starting from the oldest
+                    // This ensures we don't miss any historical data
+                    for (int i = 0; i < csvFiles.size(); i++) {
                         filesToProcess.add(csvFiles.get(i));
                     }
                     
                     // Update tracking to start with the first file we'll process
                     lastProcessedFile = filesToProcess.get(0);
                     lastProcessedLine = -1; // Process the entire file
+                    
+                    // Store this fresh state in parser memory
+                    state.storeInMemory("lastProcessedFile", lastProcessedFile);
+                    state.storeInMemory("lastProcessedLine", lastProcessedLine);
                     
                     logger.info("Starting historical processing with {} files, beginning with: {}", 
                             filesToProcess.size(), lastProcessedFile);
@@ -187,8 +205,9 @@ public class DeadsideCsvParser {
                                 deathsProcessed++;
                             }
                             
-                            // Update last processed line for tracking
+                            // Update last processed line for tracking using ParserStateManager
                             lastProcessedLine = i;
+                            state.storeInMemory("lastProcessedLine", lastProcessedLine);
                         } catch (Exception e) {
                             logger.warn("Error processing line {} in file {}: {}", 
                                     i, csvFile, e.getMessage());
@@ -200,6 +219,10 @@ public class DeadsideCsvParser {
                         // Moving to next file - reset line counter
                         lastProcessedFile = filesToProcess.get(fileIndex + 1);
                         lastProcessedLine = -1;
+                        
+                        // Store updated tracking in server-isolated state
+                        state.storeInMemory("lastProcessedFile", lastProcessedFile);
+                        state.storeInMemory("lastProcessedLine", lastProcessedLine);
                     }
                     
                     totalProcessed += deathsProcessed;
@@ -213,9 +236,18 @@ public class DeadsideCsvParser {
             
             // Update server tracking with final values
             if (totalProcessed > 0 || !lastProcessedFile.isEmpty()) {
-                server.updateKillfeedProgress(lastProcessedFile, lastProcessedLine);
-                logger.debug("Updated server tracking to file: {}, line: {}", 
-                        lastProcessedFile, lastProcessedLine);
+                // Only update database persistence for regular parsing, not during historical
+                if (!isHistoricalProcessing) {
+                    server.updateKillfeedProgress(lastProcessedFile, lastProcessedLine);
+                    logger.debug("Updated server database tracking to file: {}, line: {}", 
+                            lastProcessedFile, lastProcessedLine);
+                }
+                
+                // Always update memory state for proper server isolation
+                state.storeInMemory("lastProcessedFile", lastProcessedFile);
+                state.storeInMemory("lastProcessedLine", lastProcessedLine);
+                logger.debug("Updated state memory tracking for server {} to file: {}, line: {}", 
+                        server.getName(), lastProcessedFile, lastProcessedLine);
             }
             
             return totalProcessed;

@@ -166,13 +166,30 @@ public class HistoricalParserCommand implements ICommand {
      */
     private void disableHistoricalParsing(SlashCommandInteractionEvent event, GameServer server) {
         try {
-            // Disable historical parsing
+            // Disable historical parsing - ParserStateManager.disableHistoricalParsing already calls clearParserMemory()
             ParserStateManager.disableHistoricalParsing(server.getName(), server.getGuildId());
+            
+            // Update server database with last processed values from memory if needed
+            // This ensures continuity between historical and regular parsing
+            ParserStateManager.ParserState state = ParserStateManager.getParserState(
+                    server.getName(), server.getGuildId());
+            
+            String lastFile = (String) state.retrieveFromMemory("lastProcessedFile");
+            Long lastLine = (Long) state.retrieveFromMemory("lastProcessedLine");
+            
+            if (lastFile != null && lastLine != null) {
+                server.setLastProcessedKillfeedFile(lastFile);
+                server.setLastProcessedKillfeedLine(lastLine);
+                gameServerRepository.save(server);
+                logger.info("Updated server database state after historical parsing: file={}, line={}", 
+                        lastFile, lastLine);
+            }
             
             // Send success message
             MessageEmbed embed = EmbedUtils.createEmbed(
                     "Historical Parsing Disabled",
-                    "Historical parsing has been disabled for server: " + server.getName(),
+                    "Historical parsing has been disabled for server: " + server.getName() + 
+                    "\nServer is now ready for regular parsing with updated tracking.",
                     EmbedUtils.DEADSIDE_SUCCESS,
                     ResourceManager.getAttachmentString(ResourceManager.MAIN_LOGO)
             );
