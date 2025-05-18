@@ -1,4 +1,27 @@
-modules = ["java-latest", "python-3.11"]
+modules = ["java-latest", "python-3.11", "java-17"]
 [nix]
 channel = "stable-24_05"
-packages = ["maven", "unzip"]
+packages = ["maven", "unzip", "mongodb"]
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "DeadsideDiscordBot"
+
+[[workflows.workflow]]
+name = "DeadsideDiscordBot"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "./run_bot_with_maven.sh"
+
+[deployment]
+run = ["sh", "-c", "bash build_and_run.sh"]
